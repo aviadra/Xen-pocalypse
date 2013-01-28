@@ -5,7 +5,7 @@ logger_xen()
 {
 if [[ -n "$1" ]]; then
 DATE="$( date +%D-%T )"
-#logger -s -p local0.notice -t Xen_funcy_backup_script "	  $1" #usaful for manual runs, but not for Cron ones.
+[[ "$2" = "expose" || $DEBUG != "0" ]] && logger -s -p local0.notice -t Xen_funcy_backup_script "	  $1" && Email_func "$1" #usaful for manual runs, but not for Cron ones.
 logger -p local0.notice -t Xen_funcy_backup_script "	  $1"
 Email_VAR="$Email_VAR $DATE:	  $1 \n"
 else
@@ -17,9 +17,10 @@ fi
 Email_func()
 {
 	MSG="$1"
-	[[ ! -e $SendEmail_location ]] && logger_xen "You are missing the SendEmail perl"
+	[[ ! -e $SendEmail_location && $DEBUG = "0" ]] && logger_xen "You are missing the SendEmail perl"
 	[[ -z "$2" ]] && EMAIL_SUB="Report" || EMAIL_SUB="$2"
-	[[ $2 =~ .*Exception.* ]] && MSG="$MSG \n\n The file list was: $FILELIST \n"
+	#[[ $2 =~ .*Exception.* ]] && MSG="$MSG \n\n The VM list was obtained using $LIST_METHOD \n"
+	[[ $2 =~ .*Exception.* ]] && MSG="$MSG \n\n The VM list was obtained using $LIST_METHOD \n" && if [[ $LIST_METHOD = "FILE" ]]; then echo 1; fi
 	[[ $DEBUG = "0" ]] && [[ -e $SendEmail_location ]] && $SendEmail_location -f "$EMAIL_FROM" -t "$EMAIL_TO" -u "Xen_backup - $EMAIL_SUB" -s "$EMAIL_SMART_HOST" -q -m "$MSG"
 } 
 xen_xe_cmd()
@@ -35,9 +36,13 @@ xen_xe_cmd()
 			[[ $DEBUG = "1" ]] && logger_xen "POWERSTATE for $1 has been set to $POWERSTATE"
 			;;
 		export)
+			if [[ $ENABLE_COMPRESSION = "yes" ]]; then
+					export_cmd="$xencmd vm-export compress=true name-label=$1 filename=$BackupLocation/$1.xva"
+				else
+					export_cmd="$xencmd vm-export name-label=$1 filename=$BackupLocation/$1.xva"
+			fi
 			if [[ $DEBUG = "0" ]]; then
-				#$xencmd vm-export compress=true name-label=$1 filename=$BackupLocation/$1.xva  ##will compress every export. Saves space at the cost of resources and time
-				$xencmd vm-export name-label=$1 filename=$BackupLocation/$1.xva
+				$export_cmd
 				if [[ "`echo $?`" -eq 0 ]]; then
 					EXPORT="OK"
 					logger_xen "Successfully exported $1 :)"
@@ -45,11 +50,12 @@ xen_xe_cmd()
 					sleep 5
 				else
 					EXPORT="FAILED"
-					logger_xen "Failed to export :\ "
-					Email_func "Failed to export $1" "Exception!!"
+					logger_xen "Failed to export :\ " "expose"
+					#Email_func "Failed to export $1" "Exception!!"
 					#continue
 				fi
 			else
+				logger_xen "Export CMD was: $export_cmd"
 				EXPORT="OK"
 				logger_xen "Debug is turned on, skipped actually exporting to save time."
 			fi
@@ -57,8 +63,8 @@ xen_xe_cmd()
 		vm_properties)
 			[[ $DEBUG = "1" ]] && logger_xen "vm_properties for $1 has been invoked"
 			if [[ -z "$( $xencmd vm-list name-label=$1 )" ]]; then
-				logger_xen "The VM $1 is in the backup list, but does not exist?"
-				Email_func "The VM $1 is in the backup list, but does not exist?" "Exception!!"
+				logger_xen "The VM $1 is in the backup list, but does not exist?" "expose"
+				#Email_func "The VM $1 is in the backup list, but does not exist?" "Exception!!"
 				continue
 			else
 				xen_xe_cmd "$1" "name_2_uuid"
@@ -68,7 +74,7 @@ xen_xe_cmd()
 		start)
 			$xencmd vm-start name-label="$1"
 			if [[ "`echo $?`" -eq 0 ]] ; then
-				logger_xen "successfully started $1"
+				logger_xen "Successfully started $1"
 			else
 				logger_xen "FAILED to start $1"
 				logger_xen "Waiting for 10s and retrying to start VM $1"
@@ -83,7 +89,8 @@ xen_xe_cmd()
 					if [[ "`echo $?`" -eq 0 ]] ;then
 						logger_xen "Retry to start VM $1 was successful"
 					else
-						Email_func "FAILED twice to start $1" "Exception!!"
+						logger_xen "FAILED twice to start $1" "Exception!!" "expose"
+						#Email_func "FAILED twice to start $1" "Exception!!"
 						continue
 					fi
 					 
@@ -98,15 +105,15 @@ xen_xe_cmd()
 		shutdown)
 			xen_xe_cmd "$1" "state"
 			if [[ $POWERSTATE != "halted" ]] ; then
-				[[ $DEBUG = "1" ]] && logger_xen "about to: $xencmd vm-shutdown name-label=$1"
+				[[ $DEBUG = "1" ]] && logger_xen "About to: $xencmd vm-shutdown name-label=$1"
 				$xencmd vm-shutdown name-label="$1"
 				if [[ "`echo $?`" -eq 0 ]] ;then
 					logger_xen "Successfully shutdown VM $1"
 					logger_xen "Will now wait for 5s, to let $1 time to cool-down"
 					sleep 5
 				else
-					logger_xen "Something went wrong when shutting down the VM $1"
-					Email_func "Something went wrong when shutting down the VM $1" "Exception!!"
+					logger_xen "Something went wrong when shutting down the VM $1" "expose"
+					#Email_func "Something went wrong when shutting down the VM $1" "Exception!!"
 					continue
 				fi
 			fi
@@ -147,8 +154,8 @@ xen_xe_cmd()
 			[[ $DEBUG = "1" ]] && logger_xen "BackupLocation is: $BackupLocation"
 			FREE_SPACE_IN_BYTES=$(( $FREE_SPACE * 1024 ))
 			if [[ $(( $FREE_SPACE_IN_BYTES - $DISKS_SIZE * 2 )) -le "1000000000" ]]; then
-				logger_xen "Disqualified VM $1 for export, because the VM aggregate disk size is $(( $DISKS_SIZE / 1000000000 ))G and had we continued with this export, less than 10G would be left on the backup location."
-				Email_func "Disqualified VM $1 for export, because the VM aggregate disk size is $(( $DISKS_SIZE / 1000000000 ))G and had we continued with this export, less than 10G would be left on the backup location." "Exception - Disqualification"
+				logger_xen "Disqualified VM $1 for export, because the VM aggregate disk size is $(( $DISKS_SIZE / 1000000000 ))G and had we continued with this export, less than 10G would be left on the backup location." "expose"
+				#Email_func "Disqualified VM $1 for export, because the VM aggregate disk size is $(( $DISKS_SIZE / 1000000000 ))G and had we continued with this export, less than 10G would be left on the backup location." "Exception - Disqualification"
 				logger_xen "" # log formatting
 				continue
 			else
@@ -177,27 +184,46 @@ backup_func()
 logger_xen "Welcome to the funcky xen backup script that uses functions."
 logger_xen "" # log formatting
 
-SETTINGS_FILE="$2"
+if [[ -z "$@" ]]; then
+	logger_xen "You must pass first argument settings file and second argument backup TAG or file to work on." "expose"
+fi
+
+SETTINGS_FILE="$1"
 [[ ! -e $SETTINGS_FILE ]] && logger_xen "Settings file, $SETTINGS_FILE not found" && exit 2
 if [[ -n $( head -1 $SETTINGS_FILE | grep "settings file for the funcky" ) ]]; then 
 	source $SETTINGS_FILE && logger_xen "Settings file header found in $SETTINGS_FILE, so it was sourced."
 else
-	logger_xen "The appropriate header, was NOT found in settings file. Settings file was NOT sourced and will now exit."
+	logger_xen "The appropriate header, was NOT found in the designated settings file. The so called settings file $SETTINGS_FILE was NOT sourced and Xen-pocalypse will now exit." "expose" && exit 2
 fi
 logger_xen "" # log formatting
+Email_func "$Email_VAR" "Started"
 
 if [[ $DEBUG = "0" ]]; then WARM_UP_DELAY=60; else WARM_UP_DELAY=5 ; fi
 
 #massaging BackupLocation, so that it doesn't have trailing slashes
 BackupLocation=${BackupLocation%/}; [[ $DEBUG = "1" ]] && logger_xen "BackupLocation trailing slash have been removed"
 
-FILELIST="$1"
-[[ ! -e $FILELIST ]] && logger_xen "Filelist $FILELIST not found" && exit 2
-[[ -z "$( cat $FILELIST )" ]] && logger_xen "Filelist $1 Cannot be empty!" && exit 2
-logger_xen "VM List $1 found and had content."
-logger_xen "Will now process VM list $1."; logger_xen "" # log formatting
-Email_func "$Email_VAR" "Started"
-for VM in `cat $FILELIST`; do
+
+#VM list arbitrator
+if [[ $LIST_METHOD = "FILE" ]]; then
+	logger_xen "VM List method in the settigns file was $LIST_METHOD, so Xen-pocalypse will now treat the second argument $2 as a file."
+	FILELIST="$2"
+	[[ ! -e $FILELIST ]] && logger_xen "Filelist $FILELIST not found. Make sure the file is accessible." "expose" && exit 2
+	[[ -z "$( cat $FILELIST )" ]] && logger_xen "Filelist $1 Cannot be empty!" "expose" && exit 2
+	[[ -n $( head -1 $FILELIST | grep "settings file for the funcky" ) ]] && logger_xen "You are trying to use the settings file as the Filelist. Stop it...\n First argument is the settings file, second is the file list." "expose" && exit 2
+	logger_xen "VM List $FILELIST found and had content. Will now process VM list from $FILELIST."; logger_xen "" # log formatting"
+	VM_LIST="$( cat $FILELIST )"
+
+elif [[ $LIST_METHOD = "TAGs" ]]; then
+	logger_xen "VM List method in the settigns file was $LIST_METHOD, so Xen-pocalypse will now treat the second argument $2 as a TAG."
+	TAG="$2"
+	VM_LIST="$( xe vm-list other-config:XenCenter.CustomFields.backupTAG=$TAG params=uuid | grep uuid| awk '{print $5}' )"
+else
+	logger_xen "No recognized LIST_METHOD was given. The options are: FILE or TAGs. Please configure the settings file correctly and try again." 
+fi
+
+#The work.
+for VM in $VM_LIST; do
 	logger_xen "Working on $VM"
 	xen_xe_cmd "$VM" "vm_properties"
 	if [[ $DEP_STATE = "dep_parent" ]]; then
