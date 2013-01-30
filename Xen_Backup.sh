@@ -1,95 +1,111 @@
 #!/bin/bash
 #logging to syslog
+xencmd="/opt/xensource/bin/xe"
 
 logger_xen()
 {
 if [[ -n "$1" ]]; then
 DATE="$( date +%D-%T )"
-[[ "$2" = "expose" || $DEBUG != "0" ]] && logger -s -p local0.notice -t Xen_funcy_backup_script "	  $1" && Email_func "$1" #usaful for manual runs, but not for Cron ones.
+[[ "$2" = "expose" || $DEBUG != "0" ]] && logger -s -p local0.notice -t Xen_funcy_backup_script "	  $1"  #useful for manual runs, but not for Cron ones.
 logger -p local0.notice -t Xen_funcy_backup_script "	  $1"
-Email_VAR="$Email_VAR $DATE:	  $1 \n"
+Email_VAR="$Email_VAR $DATE:	  $1\\n"
+[[ "$2" = "expose" ]] && Email_func "$1"
 else
-	#logger -s -p local0.notice -t Xen_funcy_backup_script " " #usaful for manual runs, but not for Cron ones.
-	logger -p local0.notice -t Xen_funcy_backup_script " "
+	logger -p local0.notice -t Xen_funcy_backup_script " "; [[ "$2" = "expose" || $DEBUG != "0" ]] && logger -s -p local0.notice -t Xen_funcy_backup_script " "
 	Email_VAR="$Email_VAR \n"
 fi
 }
 Email_func()
 {
 	MSG="$1"
-	[[ ! -e $SendEmail_location && $DEBUG = "0" ]] && logger_xen "You are missing the SendEmail perl"
-	[[ -z "$2" ]] && EMAIL_SUB="Report" || EMAIL_SUB="$2"
-	#[[ $2 =~ .*Exception.* ]] && MSG="$MSG \n\n The VM list was obtained using $LIST_METHOD \n"
-	[[ $2 =~ .*Exception.* ]] && MSG="$MSG \n\n The VM list was obtained using $LIST_METHOD \n" && if [[ $LIST_METHOD = "FILE" ]]; then echo 1; fi
-	[[ $DEBUG = "0" ]] && [[ -e $SendEmail_location ]] && $SendEmail_location -f "$EMAIL_FROM" -t "$EMAIL_TO" -u "Xen_backup - $EMAIL_SUB" -s "$EMAIL_SMART_HOST" -q -m "$MSG"
+	[[ ! -x $SendEmail_location && $DEBUG != "0" ]] && logger_xen "The SendEmail_location \"$SendEmail_location\", does NOT point to a perl executable."
+	[[ -z "$2" ]] && EMAIL_SUB="Exception" || EMAIL_SUB="$2"
+	[[ "$2" = "Started" ]] && MSG="$MSG \\nThe VM list is set to be obtained using \"$LIST_METHOD\".\\nThe parameter that will be used is: \"$SECOND_PARAM\"."
+	[[ $2 =~ .*Exception.* ]] && MSG="$MSG \\nThe VM list was obtained using \"$LIST_METHOD\".\\n" && if [[ $LIST_METHOD = "FILE" ]]; then $MSG="$MSG \n\n The list was $FILELIST"; else $MSG="$MSG \n\n The TAG was $TAG" ;fi
+	[[ $DEBUG =~ .*EmailENABLed.* ]] && [[ -e $SendEmail_location ]] && $SendEmail_location -f "$EMAIL_FROM" -t "$EMAIL_TO" -u "Xen_backup - $EMAIL_SUB" -s "$EMAIL_SMART_HOST" -q -m "$MSG"
 } 
-xen_xe_cmd()
+xen_xe_func()
 {
-	xencmd="/opt/xensource/bin/xe"
 	case $2 in
 		name_2_uuid)
-			export VM_UUID="$( $xencmd vm-list name-label=$1 | grep uuid | awk '{ print $5 }' )"
-			[[ $DEBUG = "10" ]] && logger_xen "VM_UUID for $1 has been set to $VM_UUID"
+			VM_UUID="$( $xencmd vm-list name-label=$1 | grep uuid | awk '{ print $5 }' )"
+			[[ $DEBUG != "0" ]] && logger_xen "VM_UUID for \"$1\" has been set to \"$VM_UUID\"."
+			;;
+		uuid_2_name)
+			VM_NAME_FROM_UUID="$( $xencmd vm-list uuid=$1 | grep name | awk '{for (i = 4; i <= NF; i++) {printf("%s ", $i);} }' )"
+			[[ $DEBUG != "0" ]] && logger_xen "VM_NAME_FROM_UUID has been set to \"$VM_NAME_FROM_UUID\" for \"$1\"."
 			;;
 		state)
-			POWERSTATE="$( $xencmd vm-param-get param-name=power-state uuid=$VM_UUID )"
-			[[ $DEBUG = "1" ]] && logger_xen "POWERSTATE for $1 has been set to $POWERSTATE"
+			POWERSTATE="$( $xencmd vm-param-get param-name=power-state uuid=$1 )"
+			[[ $DEBUG != "0" ]] && logger_xen "POWERSTATE for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" has been set to \"$POWERSTATE\"."
 			;;
-		export)
+		org_state)
+			[[ $DEBUG != "0" ]] && logger_xen "Org sate invoked for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"."
+			xen_xe_func "$1" "state"
+			ORG_STATE=$POWERSTATE
+			logger_xen "ORG_STATE for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" as been set to \"$ORG_STATE\"."
+			;;
+		export)	
+			xen_xe_func "$1" "uuid_2_name"
 			if [[ $ENABLE_COMPRESSION = "yes" ]]; then
-					export_cmd="$xencmd vm-export compress=true name-label=$1 filename=$BackupLocation/$1.xva"
+					export_cmd="$xencmd vm-export compress=true uuid=$1 filename=\"${BackupLocation}/${VM_NAME_FROM_UUID}-${1}.xva\""
 				else
-					export_cmd="$xencmd vm-export name-label=$1 filename=$BackupLocation/$1.xva"
+					export_cmd="$xencmd vm-export uuid=$1 filename=$BACKUP_FILE_AND_LOCAL_LONG"
 			fi
-			if [[ $DEBUG = "0" ]]; then
+			if [[ $DEBUG = "0" || $DEBUG =~ .*ExportENABLed.* ]]; then
 				$export_cmd
 				if [[ "`echo $?`" -eq 0 ]]; then
 					EXPORT="OK"
-					logger_xen "Successfully exported $1 :)"
-					logger_xen "Will now wait for 5s, to let $1 time to cool-down"
+					logger_xen "Successfully exported \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" :)"
+					logger_xen "Will now wait for 5s, to let \"$1\" time to cool-down."
 					sleep 5
 				else
 					EXPORT="FAILED"
-					logger_xen "Failed to export :\ " "expose"
+					logger_xen "Failed to export :\ \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"" "expose"
 					#Email_func "Failed to export $1" "Exception!!"
 					#continue
 				fi
 			else
-				logger_xen "Export CMD was: $export_cmd"
+				logger_xen "Export CMD was: \"$export_cmd\""
 				EXPORT="OK"
 				logger_xen "Debug is turned on, skipped actually exporting to save time."
 			fi
 			;;
 		vm_properties)
-			[[ $DEBUG = "1" ]] && logger_xen "vm_properties for $1 has been invoked"
-			if [[ -z "$( $xencmd vm-list name-label=$1 )" ]]; then
-				logger_xen "The VM $1 is in the backup list, but does not exist?" "expose"
-				#Email_func "The VM $1 is in the backup list, but does not exist?" "Exception!!"
+			[[ $DEBUG != "0" ]] && logger_xen "Vm_properties for \"$1\" has been invoked."
+				xen_xe_func "$1" "vm-existance"
+				VM_UUID="$1"
+				xen_xe_func "$VM_UUID" "uuid_2_name"
+				xen_xe_func "$VM_UUID" "deps_state_custom"
+			;;
+		vm-existance)
+			if [[ -z "$( $xencmd vm-list uuid=$1 )" && -z "$( $xencmd vm-list name-label=$1 )" ]]; then
+				logger_xen "The VM \"$1\" is in the backup list, but does not exist?" "expose"
 				continue
-			else
-				xen_xe_cmd "$1" "name_2_uuid"
-				xen_xe_cmd "$1" "deps_state_custom"
 			fi
 			;;
 		start)
-			$xencmd vm-start name-label="$1"
+			VM_TO_START="$1"
+			[[ "$3" = "child" ]] && VM_TO_START="$( $xencmd vm-list name-label=$1 | grep uuid | awk '{ print $5 }' )"
+			[[ $DEBUG != "0" ]] && logger_xen "VM_TO_START was set to: $VM_TO_START. (Its name is: \"$VM_NAME_FROM_UUID\")"
+			$xencmd vm-start uuid="$VM_TO_START"
 			if [[ "`echo $?`" -eq 0 ]] ; then
-				logger_xen "Successfully started $1"
+				logger_xen "Successfully started \"$1\""
 			else
-				logger_xen "FAILED to start $1"
-				logger_xen "Waiting for 10s and retrying to start VM $1"
+				logger_xen "FAILED to start \"$1\""
+				logger_xen "Waiting for 10s and retrying to start VM \"$1\""
 				sleep 10
-				$xencmd vm-start name-label="$1"
+				$xencmd vm-start uuid="$1"
 				if [[ "`echo $?`" -eq 0 ]] ;then
-					logger_xen "Retry to start VM $1 was successful"
+					logger_xen "Retry to start VM \"$1\" was successful"
 				else
-					logger_xen "FAILED again to start $1. Will sleep for $WARM_UP_DELAY seconds and try a third and final time"
+					logger_xen "FAILED again to start \"$1\". Will sleep for $WARM_UP_DELAY seconds and try a third and final time"
 					sleep $WARM_UP_DELAY
-					$xencmd vm-start name-label="$1"
+					$xencmd vm-start uuid="$1"
 					if [[ "`echo $?`" -eq 0 ]] ;then
-						logger_xen "Retry to start VM $1 was successful"
+						logger_xen "Retry to start VM \"$1\" was successful"
 					else
-						logger_xen "FAILED twice to start $1" "Exception!!" "expose"
+						logger_xen "FAILED twice to start \"$1\"" "Exception!!" "expose"
 						#Email_func "FAILED twice to start $1" "Exception!!"
 						continue
 					fi
@@ -97,70 +113,72 @@ xen_xe_cmd()
 				fi
 			fi
 			;;
-		org_state)
-			xen_xe_cmd "$1" "state"
-			ORG_STATE=$POWERSTATE
-			logger_xen "ORG_STATE for $1 as been set to $ORG_STATE"
-			;;
 		shutdown)
-			xen_xe_cmd "$1" "state"
+			xen_xe_func "$1" "state"
 			if [[ $POWERSTATE != "halted" ]] ; then
-				[[ $DEBUG = "1" ]] && logger_xen "About to: $xencmd vm-shutdown name-label=$1"
-				$xencmd vm-shutdown name-label="$1"
+				[[ $DEBUG != "0" ]] && logger_xen "About to: \"$xencmd vm-shutdown uuid=$1\"."
+				$xencmd vm-shutdown uuid="$1"
 				if [[ "`echo $?`" -eq 0 ]] ;then
-					logger_xen "Successfully shutdown VM $1"
-					logger_xen "Will now wait for 5s, to let $1 time to cool-down"
+					logger_xen "Successfully shutdown VM \"$1\"."
+					logger_xen "Will now wait for 5s, to let \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" time to cool-down"
 					sleep 5
 				else
-					logger_xen "Something went wrong when shutting down the VM $1" "expose"
-					#Email_func "Something went wrong when shutting down the VM $1" "Exception!!"
+					logger_xen "Something went wrong when shutting down the VM \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"" "expose"
 					continue
 				fi
 			fi
-			xen_xe_cmd "$1" "state"
+			xen_xe_func "$1" "state"
 			;;
 		deps_state_custom)
-			xen_xe_cmd "$1" "name_2_uuid"
-			#reset state
 			DEP_STATE="null"
 			CHILDREN_LIST="null"
 			PARENT="null"
+			logger_xen "The deps_state_custom func has been invoked for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"."
 			CHILDREN_LIST="$( $xencmd vm-param-get uuid=$VM_UUID param-name=other-config param-key=XenCenter.CustomFields.Children 2> /dev/null )"
 			if [[ "`echo $?`" -eq 0 ]] ; then
-				logger_xen "VM has children. They are: $CHILDREN_LIST"
+				logger_xen "VM has children. They are: $CHILDREN_LIST."
+				for CHILD_NAME in $CHILDREN_LIST; do
+					xen_xe_func "$CHILD_NAME" "name_2_uuid"
+					CHILDREN_LIST_UUID="$CHILDREN_LIST_UUID $VM_UUID"
+					[[ $DEBUG != "0" ]] && logger_xen "The current CHILDREN_LIST_UUID is: \"$CHILDREN_LIST_UUID\"."
+				done
 				DEP_STATE="dep_parent"
 			else
-				[[ $DEBUG = "1" ]] && logger_xen "No Children were found for $1. looking for a PARENT."
+				[[ $DEBUG != "0" ]] && logger_xen "No Children were found for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\". looking for a PARENT."
 				PARENT="$( $xencmd vm-param-get uuid=$VM_UUID param-name=other-config param-key=XenCenter.CustomFields.Parent 2> /dev/null )"
 				if [[ "`echo $?`" -eq 0 ]] ; then
 					logger_xen "VM has a Parent. It is: $PARENT"
 					DEP_STATE="dep_child"
 				else
-					[[ $DEBUG = "1" ]] &&  logger_xen "No Parent was found for $1."
+					[[ $DEBUG != "0" ]] &&  logger_xen "No Parent was found for \"$VM_NAME_FROM_UUID\"."
 				fi
 			fi
-			[[ $DEBUG = "1" ]] &&  logger_xen "DEP_STATE has been set to: $DEP_STATE. the current CHILDREN_LIST is: $CHILDREN_LIST and the PARENT is: $PARENT."
+			[[ $DEBUG != "0" ]] &&  logger_xen "DEP_STATE has been set to: \"$DEP_STATE\". the current CHILDREN_LIST is: \"$CHILDREN_LIST\" and the PARENT is: \"$PARENT\"."
 			;;
 
 		space_for_backup_check)
 			DISKS_SIZE=0
-			for DISK in $( xe vm-disk-list vm=$1 | grep virtual-size | awk '{print $4}' ); do 
-				logger_xen "Disk with the size of $DISK, was found for VM $1"
+			for DISK in $( $xencmd vm-disk-list uuid=$1 | grep virtual-size | awk '{print $4}' ); do 
+				logger_xen "Disk with the size of \"$DISK\", was found for VM \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"."
 				DISKS_SIZE=$(( $DISKS_SIZE + $DISK ))
 			done
-			logger_xen "Total disks size is $DISKS_SIZE"
+			logger_xen "Total disks size for \"$VM_NAME_FROM_UUID\" is \"$DISKS_SIZE\"."
 			FREE_SPACE="$( df $BackupLocation | grep $BackupLocation | awk '{print $3}' )"
-			[[ $DEBUG = "1" ]] && logger_xen "FREE_SPACE="$( df $BackupLocation | grep $BackupLocation | awk '{print $3}' )""
-			[[ $DEBUG = "1" ]] && logger_xen "BackupLocation is: $BackupLocation"
-			FREE_SPACE_IN_BYTES=$(( $FREE_SPACE * 1024 ))
-			if [[ $(( $FREE_SPACE_IN_BYTES - $DISKS_SIZE * 2 )) -le "1000000000" ]]; then
-				logger_xen "Disqualified VM $1 for export, because the VM aggregate disk size is $(( $DISKS_SIZE / 1000000000 ))G and had we continued with this export, less than 10G would be left on the backup location." "expose"
-				#Email_func "Disqualified VM $1 for export, because the VM aggregate disk size is $(( $DISKS_SIZE / 1000000000 ))G and had we continued with this export, less than 10G would be left on the backup location." "Exception - Disqualification"
-				logger_xen "" # log formatting
-				continue
+			if [[ -n $FREE_SPACE ]] ; then 
+				[[ $DEBUG != "0" ]] && logger_xen "FREE_SPACE="$( df $BackupLocation | grep $BackupLocation | awk '{print $3}' )""
+				[[ $DEBUG != "0" ]] && logger_xen "BackupLocation is: $BackupLocation"
+				FREE_SPACE_IN_BYTES=$(( $FREE_SPACE * 1024 ))
+				if [[ $(( $FREE_SPACE_IN_BYTES - $DISKS_SIZE * 2 )) -le "1000000000" ]]; then
+					#Email_func "Disqualified VM $1 for export, because the VM aggregate disk size is $(( $DISKS_SIZE / 1000000000 ))G and had we continued with this export, less than 10G would be left on the backup location." "Exception - Disqualification"
+					logger_xen "Disqualified VM $1 for export, because the VM aggregate disk size is $(( $DISKS_SIZE / 1000000000 ))G and had we continued with this export, less than 10G would be left on the backup location." "expose"
+					logger_xen "" # log formatting
+					continue
+				else
+					[[ $DEBUG != "0" ]] && logger_xen "There was enough space for the backup :)"
+					#logger_xen "" # log formatting
+				fi
 			else
-				[[ $DEBUG = "1" ]] && logger_xen "There was enough space for the backup :)"
-				logger_xen "" # log formatting
+				[[ $CHECK_FREE_SPACE = "yes" ]] && CHECK_FREE_SPACE="no" && logger_xen "" && logger_xen "Assessment of the FREE_SPACE parameter failed for backup location \"$BackupLocation\". You may disable this check in the settings file.\\nNote: This is a known issue when the backup location is a subdirectory in the mounted share." "expose" && logger_xen ""
 			fi
 		;;
 		 
@@ -169,19 +187,23 @@ xen_xe_cmd()
 }
 backup_func()
 {
-	xen_xe_cmd "$1" "vm_properties"
-	xen_xe_cmd "$1" "space_for_backup_check"
-	xen_xe_cmd "$1" "org_state"
-	[[ -e $BackupLocation/$1.xva ]] && mv -v $BackupLocation/$1.xva $BackupLocation/$1.xva.org && logger_xen "Moved old backup to temp location"
-	[[ $POWERSTATE = "running" ]] && xen_xe_cmd "$1" "shutdown"
-	logger_xen "Now exporting $1"
-	xen_xe_cmd "$1" "export"
-	[[ $ORG_STATE = "running" ]] && [[ "$2" != "child" ]] && logger_xen "Now starting up $1, because ORG_STATE was $ORG_STATE" && xen_xe_cmd "$1" "start" && logger_xen "Giving $WARM_UP_DELAY seconds so that $1 finishes warming up" && sleep $WARM_UP_DELAY
+	logger_xen "Backup func has been invoked for \"$1\"."
+	VM_TO_BACKUP="$1"
+	xen_xe_func "$VM_TO_BACKUP" "uuid_2_name"
+	xen_xe_func "$VM_TO_BACKUP" "space_for_backup_check"
+	xen_xe_func "$VM_TO_BACKUP" "org_state"
+	BACKUP_FILE_AND_LOCAL_LONG="${BackupLocation}/${VM_NAME_FROM_UUID}- ${1}.xva"
+	BACKUP_FILE_AND_LOCAL_LONG="${BACKUP_FILE_AND_LOCAL_LONG// /_}"
+	[[ -e "$BACKUP_FILE_AND_LOCAL_LONG" ]] && mv -v "$BACKUP_FILE_AND_LOCAL_LONG" "$BACKUP_FILE_AND_LOCAL_LONG.org" && logger_xen "Moved old backup to temp location."
+	[[ $POWERSTATE = "running" ]] && xen_xe_func "$1" "shutdown"
+	logger_xen "Now exporting \"$VM_TO_BACKUP\"."
+	xen_xe_func "$VM_TO_BACKUP" "export"
+	[[ $ORG_STATE = "running" ]] && [[ "$2" != "child" ]] && logger_xen "Now starting up $1, because ORG_STATE was $ORG_STATE" && xen_xe_func "$1" "start" && logger_xen "Giving $WARM_UP_DELAY seconds so that $1 finishes warming up" && sleep $WARM_UP_DELAY
 	[[ $2 = "child" ]] && logger_xen "This VM is a CHILD, will not start it until PARENT is done."
-	[[ $EXPORT = "OK" ]] && rm -iv $BackupLocation/$1.xva.org -f && logger_xen "Deleted old backup as new one is OK"
+	[[ $EXPORT = "OK" ]] && rm -v "$BACKUP_FILE_AND_LOCAL_LONG.org" -f && logger_xen "Deleted old backup for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" as new one is OK."
 }
 ##################ENGINE#############################################
-logger_xen "Welcome to the funcky xen backup script that uses functions."
+logger_xen "Welcome to the Xen-pocalypse backup script that uses functions."
 logger_xen "" # log formatting
 
 if [[ -z "$@" ]]; then
@@ -191,58 +213,83 @@ fi
 SETTINGS_FILE="$1"
 [[ ! -e $SETTINGS_FILE ]] && logger_xen "Settings file, $SETTINGS_FILE not found" && exit 2
 if [[ -n $( head -1 $SETTINGS_FILE | grep "settings file for the funcky" ) ]]; then 
-	source $SETTINGS_FILE && logger_xen "Settings file header found in $SETTINGS_FILE, so it was sourced."
+	source $SETTINGS_FILE && logger_xen "Settings file header found in \"$SETTINGS_FILE\", so it was sourced."
 else
-	logger_xen "The appropriate header, was NOT found in the designated settings file. The so called settings file $SETTINGS_FILE was NOT sourced and Xen-pocalypse will now exit." "expose" && exit 2
+	logger_xen "The appropriate header, was NOT found in the designated settings file. The so called settings file $SETTINGS_FILE was NOT sourced and Xen-pocalypse will now exit." "expose"
+	echo "The appropriate header, was NOT found in the designated settings file. The so called settings file $SETTINGS_FILE was NOT sourced and Xen-pocalypse will now exit."
+	exit 2
 fi
 logger_xen "" # log formatting
+SECOND_PARAM="$2"
 Email_func "$Email_VAR" "Started"
+
+
 
 if [[ $DEBUG = "0" ]]; then WARM_UP_DELAY=60; else WARM_UP_DELAY=5 ; fi
 
 #massaging BackupLocation, so that it doesn't have trailing slashes
-BackupLocation=${BackupLocation%/}; [[ $DEBUG = "1" ]] && logger_xen "BackupLocation trailing slash have been removed"
+BackupLocation=${BackupLocation%/}; [[ $DEBUG != "0" ]] && logger_xen "BackupLocation trailing slash have been removed"
 
 
 #VM list arbitrator
 if [[ $LIST_METHOD = "FILE" ]]; then
-	logger_xen "VM List method in the settigns file was $LIST_METHOD, so Xen-pocalypse will now treat the second argument $2 as a file."
+	logger_xen "VM List method in the settings file was \"$LIST_METHOD\", so Xen-pocalypse will now treat the second argument \"$2\" as a file."
 	FILELIST="$2"
-	[[ ! -e $FILELIST ]] && logger_xen "Filelist $FILELIST not found. Make sure the file is accessible." "expose" && exit 2
-	[[ -z "$( cat $FILELIST )" ]] && logger_xen "Filelist $1 Cannot be empty!" "expose" && exit 2
-	[[ -n $( head -1 $FILELIST | grep "settings file for the funcky" ) ]] && logger_xen "You are trying to use the settings file as the Filelist. Stop it...\n First argument is the settings file, second is the file list." "expose" && exit 2
-	logger_xen "VM List $FILELIST found and had content. Will now process VM list from $FILELIST."; logger_xen "" # log formatting"
+	if [[ ! -e $FILELIST ]]; then
+		logger_xen "Filelist \"$FILELIST\" not found. Make sure the file is accessible." "expose" 
+		exit 2
+	fi
+	if [[ -z "$( cat $FILELIST )" ]]; then
+		logger_xen "Filelist \"$2\" cannot be empty!" "expose"
+		exit 2
+	fi
+	if [[ -n $( head -1 $FILELIST | grep "settings file for the funcky" ) ]]; then
+		logger_xen "You are trying to use the settings file as the Filelist. Stop it...\n First argument is the settings file, second is the file list." "expose"
+		exit 2
+	fi
+	logger_xen "VM List $FILELIST found and had content. Will now process VM list from \"$FILELIST\"."; logger_xen "" # log formatting"
 	VM_LIST="$( cat $FILELIST )"
+	for VM_NAME in $VM_LIST; do
+		xen_xe_func "$VM_NAME" "vm-existance"
+		xen_xe_func "$VM_NAME" "name_2_uuid"
+		VM_LIST_UUID="$VM_LIST_UUID $VM_UUID"
+		[[ $DEBUG != "0" ]] && logger_xen "the current VM_LIST_UUID is: \"$VM_LIST_UUID\""
+	done
 
 elif [[ $LIST_METHOD = "TAGs" ]]; then
-	logger_xen "VM List method in the settigns file was $LIST_METHOD, so Xen-pocalypse will now treat the second argument $2 as a TAG."
+	logger_xen "VM List method in the settings file was \"$LIST_METHOD\", so Xen-pocalypse will now treat the second argument \"$2\" as a TAG."
 	TAG="$2"
-	VM_LIST="$( xe vm-list other-config:XenCenter.CustomFields.backupTAG=$TAG params=uuid | grep uuid| awk '{print $5}' )"
+	VM_LIST="$( $xencmd vm-list other-config:XenCenter.CustomFields.BackupTAG=$TAG params=uuid | grep uuid| awk '{print $5}' )"
+	VM_LIST_UUID=$VM_LIST
 else
 	logger_xen "No recognized LIST_METHOD was given. The options are: FILE or TAGs. Please configure the settings file correctly and try again." 
 fi
+logger_xen ""
+logger_xen ""
+
+
 
 #The work.
-for VM in $VM_LIST; do
-	logger_xen "Working on $VM"
-	xen_xe_cmd "$VM" "vm_properties"
+for VM in $VM_LIST_UUID; do
+	logger_xen "Working on \"$VM\""
+	xen_xe_func "$VM" "vm_properties"
 	if [[ $DEP_STATE = "dep_parent" ]]; then
-		logger_xen "Found that $VM is a Parent for $CHILDREN_LIST. Will now backup the children."
-		for CHILD in $CHILDREN_LIST; do
-			logger_xen "Backing up CHILD $CHILD for PARENT $VM"
+		logger_xen "Found that \"$VM_NAME_FROM_UUID\" is a Parent for \"$CHILDREN_LIST\". Will now backup the children."
+		for CHILD in $CHILDREN_LIST_UUID; do
+			logger_xen "Backing up CHILD \"$CHILD\" for PARENT $VM_NAME_FROM_UUID."
 			backup_func "$CHILD" "child"
 			logger_xen "" # log formatting
 		done
-		logger_xen "Done backing-up the children and will now backup the PARENT $VM"
+		logger_xen "Done backing-up the children and will now backup the PARENT \"$VM_NAME_FROM_UUID\""
 		backup_func "$VM"
-		logger_xen "Now that PARENT $PARENT has been backed-up, will now start children $CHILDREN_LIST"
+		logger_xen "Now that PARENT \"$VM_NAME_FROM_UUID\" with UUID of: \"$VM\" has been backed-up, will now start children: $CHILDREN_LIST."
 		for CHILD in $CHILDREN_LIST; do
-			xen_xe_cmd "$CHILD" "start"
+			xen_xe_func "$CHILD" "start" "child"
 		done
-		logger_xen "Done starting all children for $VM"
+		logger_xen "Done starting all children for \"$VM_NAME_FROM_UUID\" with UUID of: \"$VM\""
 		logger_xen "" # log formatting
 	elif [[ $DEP_STATE = "dep_child" ]]; then
-			logger_xen "Found this VM $VM to be a CHILD of $PARENT, so skipping it for now."
+			logger_xen "Found this VM \"$VM\" to be a CHILD of $PARENT, so skipping it for now."
 			logger_xen "" # log formatting
 	fi
 	[[ $DEP_STATE = "null" ]] && backup_func "$VM"
@@ -251,4 +298,4 @@ done
  
 #Yey Done
 logger_xen "Backup script has finished its run and will now Email the report."
-Email_func "$Email_VAR"
+Email_func "$Email_VAR" "Report"
