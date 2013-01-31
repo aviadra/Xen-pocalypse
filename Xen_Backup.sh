@@ -14,7 +14,7 @@ if [[ -n "$1" ]]; then
 DATE="$( date +%D-%T )"
 $logger_cmd "	  $1"  #useful for manual runs, but not for Cron ones.
 Email_VAR="$Email_VAR $DATE:	  $1\\n"
-[[ "$2" = "expose" ]] && Email_func "$1"
+[[ "$2" = "expose" ]] && Email_func "$1" "$3"
 else
 	$logger_cmd " "
 	Email_VAR="$Email_VAR \n"
@@ -26,29 +26,29 @@ Email_func()
 	[[ ! -x $SendEmail_location ]] && logger_xen "The SendEmail_location \"$SendEmail_location\", does NOT point to a perl executable." && continue
 	[[ -z "$2" ]] && EMAIL_SUB="Exception" || EMAIL_SUB="$2"
 	[[ "$2" = "Started" ]] && MSG="$MSG \\nThe VM list is set to be obtained using \"$LIST_METHOD\".\\nThe parameter that will be used is: \"$SECOND_PARAM\"."
-	[[ $2 =~ .*Exception.* ]] && MSG="$MSG \\nThe VM list was obtained using \"$LIST_METHOD\".\\n" && if [[ $LIST_METHOD = "FILE" ]]; then $MSG="$MSG \n\n The list was $FILELIST"; else $MSG="$MSG \n\n The TAG was $TAG" ;fi
-	[[ $DEBUG =~ .*EmailENABLed.* || -e $SendEmail_location ]] && $SendEmail_location -f "$EMAIL_FROM" -t "$EMAIL_TO" -u "Xen_backup - $EMAIL_SUB" -s "$EMAIL_SMART_HOST" -q -m "$MSG"
+	[[ "$2" =~ .*Exception.* ]] && MSG="$MSG \\nThe VM list was obtained using \"$LIST_METHOD\".\\n" && if [[ $LIST_METHOD = "FILE" ]]; then MSG="$MSG \n\n The list was $FILELIST"; else MSG="$MSG \n\n The TAG was $TAG" ;fi
+	[[ $DEBUG = "0" || $DEBUG =~ .*EmailENABLed.* ]] && [[ -e $SendEmail_location ]] && $SendEmail_location -f "$EMAIL_FROM" -t "$EMAIL_TO" -u "Xen_backup - $EMAIL_SUB" -s "$EMAIL_SMART_HOST" -q -m "$MSG"
 } 
 xen_xe_func()
 {
 	case $2 in
 		name_2_uuid)
 			VM_UUID="$( $xencmd vm-list name-label=$1 | grep uuid | awk '{ print $5 }' )"
-			[[ $DEBUG != "0" ]] && logger_xen "VM_UUID for \"$1\" has been set to \"$VM_UUID\"."
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*name_2_uuid.* ]] && logger_xen "VM_UUID for \"$1\" has been set to \"$VM_UUID\"."
 			;;
 		uuid_2_name)
 			VM_NAME_FROM_UUID="$( $xencmd vm-list uuid=$1 | grep name | awk '{for (i = 4; i <= NF; i++) {printf("%s ", $i);} }' )"
-			[[ $DEBUG != "0" ]] && logger_xen "VM_NAME_FROM_UUID has been set to \"$VM_NAME_FROM_UUID\" for \"$1\"."
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*uuid_2_name.* ]] && logger_xen "VM_NAME_FROM_UUID has been set to \"$VM_NAME_FROM_UUID\" for \"$1\"."
 			;;
 		state)
 			POWERSTATE="$( $xencmd vm-param-get param-name=power-state uuid=$1 )"
-			[[ $DEBUG != "0" ]] && logger_xen "POWERSTATE for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" has been set to \"$POWERSTATE\"."
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*state.* ]] && logger_xen "POWERSTATE for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" has been set to \"$POWERSTATE\"."
 			;;
 		org_state)
-			[[ $DEBUG != "0" ]] && logger_xen "Org sate invoked for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"."
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*org_state.* ]] && logger_xen "Org sate invoked for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"."
 			xen_xe_func "$1" "state"
 			ORG_STATE=$POWERSTATE
-			logger_xen "ORG_STATE for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" as been set to \"$ORG_STATE\"."
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*org_state.* ]] && logger_xen "ORG_STATE for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" as been set to \"$ORG_STATE\"."
 			;;
 		export)	
 			xen_xe_func "$1" "uuid_2_name"
@@ -58,11 +58,11 @@ xen_xe_func()
 					export_cmd="$xencmd vm-export uuid=$1 filename=$BACKUP_FILE_AND_LOCAL_LONG"
 			fi
 			if [[ $DEBUG = "0" || $DEBUG =~ .*ExportENABLed.* ]]; then
-				$export_cmd
+				$export_cmd > /dev/null
 				if [[ "`echo $?`" -eq 0 ]]; then
 					EXPORT="OK"
 					logger_xen "Successfully exported \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" :)"
-					logger_xen "Will now wait for 5s, to let \"$1\" time to cool-down."
+					[[ $DEBUG = "ALL" || $DEBUG =~ .*Export_func.* ]] && logger_xen "Will now wait for 5s, to let \"$1\" time to cool-down."
 					sleep 5
 				else
 					EXPORT="FAILED"
@@ -77,7 +77,7 @@ xen_xe_func()
 			fi
 			;;
 		vm_properties)
-			[[ $DEBUG != "0" ]] && logger_xen "Vm_properties for \"$1\" has been invoked."
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*vm_properties.* ]] && logger_xen "Vm_properties for \"$1\" has been invoked."
 				xen_xe_func "$1" "vm-existance"
 				VM_UUID="$1"
 				xen_xe_func "$VM_UUID" "uuid_2_name"
@@ -92,7 +92,7 @@ xen_xe_func()
 		start)
 			VM_TO_START="$1"
 			[[ "$3" = "child" ]] && VM_TO_START="$( $xencmd vm-list name-label=$1 | grep uuid | awk '{ print $5 }' )"
-			[[ $DEBUG != "0" ]] && logger_xen "VM_TO_START was set to: \"$VM_TO_START\". (Its name is: \"$VM_NAME_FROM_UUID\")"
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*start.* ]] && logger_xen "VM_TO_START was set to: \"$VM_TO_START\". (Its name is: \"$VM_NAME_FROM_UUID\")"
 			$xencmd vm-start uuid="$VM_TO_START"
 			if [[ "`echo $?`" -eq 0 ]] ; then
 				logger_xen "Successfully started \"$1\""
@@ -125,7 +125,7 @@ xen_xe_func()
 				$xencmd vm-shutdown uuid="$1"
 				if [[ "`echo $?`" -eq 0 ]] ;then
 					logger_xen "Successfully shutdown VM \"$1\"."
-					logger_xen "Will now wait for 5s, to let \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" time to cool-down"
+					[[ $DEBUG = "ALL" || $DEBUG =~ .*shutdown.* ]] && logger_xen "Will now wait for 5s, to let \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" time to cool-down"
 					sleep 5
 				else
 					logger_xen "Something went wrong when shutting down the VM \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"" "expose"
@@ -138,48 +138,49 @@ xen_xe_func()
 			DEP_STATE="null"
 			CHILDREN_LIST="null"
 			PARENT="null"
-			logger_xen "The deps_state_custom func has been invoked for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"."
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*deps_state_custom.* ]] && logger_xen "The deps_state_custom func has been invoked for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"."
 			CHILDREN_LIST="$( $xencmd vm-param-get uuid=$VM_UUID param-name=other-config param-key=XenCenter.CustomFields.Children 2> /dev/null )"
 			if [[ "`echo $?`" -eq 0 ]] ; then
 				logger_xen "VM has children. They are: $CHILDREN_LIST."
 				for CHILD_NAME in $CHILDREN_LIST; do
 					xen_xe_func "$CHILD_NAME" "name_2_uuid"
 					CHILDREN_LIST_UUID="$CHILDREN_LIST_UUID $VM_UUID"
-					[[ $DEBUG != "0" ]] && logger_xen "The current CHILDREN_LIST_UUID is: \"$CHILDREN_LIST_UUID\"."
+					[[ $DEBUG = "ALL" || $DEBUG =~ .*deps_state_custom.* ]] && logger_xen "The current CHILDREN_LIST_UUID is: \"$CHILDREN_LIST_UUID\"."
 				done
 				DEP_STATE="dep_parent"
 			else
-				[[ $DEBUG != "0" ]] && logger_xen "No Children were found for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\". looking for a PARENT."
+				[[ $DEBUG = "ALL" || $DEBUG =~ .*deps_state_custom.* ]] && logger_xen "No Children were found for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\". looking for a PARENT."
 				PARENT="$( $xencmd vm-param-get uuid=$VM_UUID param-name=other-config param-key=XenCenter.CustomFields.Parent 2> /dev/null )"
 				if [[ "`echo $?`" -eq 0 ]] ; then
-					logger_xen "VM has a Parent. It is: \"$PARENT\"."
+					[[ $DEBUG = "ALL" || $DEBUG =~ .*deps_state_custom.* ]] && logger_xen "VM has a Parent. It is: \"$PARENT\"."
 					DEP_STATE="dep_child"
 				else
-					[[ $DEBUG != "0" ]] &&  logger_xen "No Parent was found for \"$VM_NAME_FROM_UUID\"."
+					[[ $DEBUG = "ALL" || $DEBUG =~ .*deps_state_custom.* ]] && logger_xen "No Parent was found for \"$VM_NAME_FROM_UUID\"."
 				fi
 			fi
-			[[ $DEBUG != "0" ]] &&  logger_xen "DEP_STATE has been set to: \"$DEP_STATE\". the current CHILDREN_LIST is: \"$CHILDREN_LIST\" and the PARENT is: \"$PARENT\"."
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*deps_state_custom.* ]] && logger_xen "DEP_STATE has been set to: \"$DEP_STATE\". the current CHILDREN_LIST is: \"$CHILDREN_LIST\" and the PARENT is: \"$PARENT\"."
 			;;
 
 		space_for_backup_check)
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*space_for_backup_check.* ]] && logger_xen "Func space_for_backup_check has been invoked."
 			DISKS_SIZE=0
 			for DISK in $( $xencmd vm-disk-list uuid=$1 | grep virtual-size | awk '{print $4}' ); do 
-				logger_xen "Disk with the size of \"$DISK\", was found for VM \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"."
+				[[ $DEBUG = "ALL" || $DEBUG =~ .*space_for_backup_check.* ]] && logger_xen "Disk with the size of \"$DISK\", was found for VM \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"."
 				DISKS_SIZE=$(( $DISKS_SIZE + $DISK ))
 			done
-			logger_xen "Total disks size for \"$VM_NAME_FROM_UUID\" is \"$DISKS_SIZE\"."
+			logger_xen "Total disks size is: \"$DISKS_SIZE\" for \"$VM_NAME_FROM_UUID\"."
 			FREE_SPACE="$( df $BackupLocation | grep $BackupLocation | awk '{print $3}' )"
 			if [[ -n $FREE_SPACE ]] ; then 
-				[[ $DEBUG != "0" ]] && logger_xen "FREE_SPACE="$( df $BackupLocation | grep $BackupLocation | awk '{print $3}' )""
-				[[ $DEBUG != "0" ]] && logger_xen "BackupLocation is: $BackupLocation"
+				[[ $DEBUG = "ALL" || $DEBUG =~ .*space_for_backup_check.* ]] && logger_xen "FREE_SPACE="$( df $BackupLocation | grep $BackupLocation | awk '{print $3}' )""
+				[[ $DEBUG = "ALL" || $DEBUG =~ .*space_for_backup_check.* ]] && logger_xen "BackupLocation is: $BackupLocation"
 				FREE_SPACE_IN_BYTES=$(( $FREE_SPACE * 1024 ))
 				if [[ $(( $FREE_SPACE_IN_BYTES - $DISKS_SIZE * 2 )) -le "1000000000" ]]; then
-					#Email_func "Disqualified VM $1 for export, because the VM aggregate disk size is $(( $DISKS_SIZE / 1000000000 ))G and had we continued with this export, less than 10G would be left on the backup location." "Exception - Disqualification"
-					logger_xen "Disqualified VM $1 for export, because the VM aggregate disk size is $(( $DISKS_SIZE / 1000000000 ))G and had we continued with this export, less than 10G would be left on the backup location." "expose"
+					logger_xen "Disqualified VM \"$VM_NAME_FROM_UUID\" form export, because the VM aggregate disk size is $(( $DISKS_SIZE / 1000000000 ))G and had we continued with this export, less than 10G would be left on the backup location." "expose" "Exception - Disqualification"
+					logger_xen "" # log formatting
 					logger_xen "" # log formatting
 					continue
 				else
-					[[ $DEBUG != "0" ]] && logger_xen "There was enough space for the backup :)"
+					[[ $DEBUG = "ALL" || $DEBUG =~ .*space_for_backup_check.* ]] && logger_xen "There was enough space for the backup :)"
 					#logger_xen "" # log formatting
 				fi
 			else
@@ -200,13 +201,13 @@ backup_func()
 	xen_xe_func "$VM_TO_BACKUP" "org_state"
 	BACKUP_FILE_AND_LOCAL_LONG="${BackupLocation}/${VM_NAME_FROM_UUID}- ${1}.xva"
 	BACKUP_FILE_AND_LOCAL_LONG="${BACKUP_FILE_AND_LOCAL_LONG// /_}"
-	[[ -e "$BACKUP_FILE_AND_LOCAL_LONG" ]] && mv -v "$BACKUP_FILE_AND_LOCAL_LONG" "$BACKUP_FILE_AND_LOCAL_LONG.org" && logger_xen "Moved old backup to temp location."
+	[[ -e "$BACKUP_FILE_AND_LOCAL_LONG" ]] && mv "$BACKUP_FILE_AND_LOCAL_LONG" "$BACKUP_FILE_AND_LOCAL_LONG.org" && logger_xen "Moved old backup to temp location."
 	[[ $POWERSTATE = "running" ]] && xen_xe_func "$1" "shutdown"
 	logger_xen "Now exporting \"$VM_TO_BACKUP\"."
 	xen_xe_func "$VM_TO_BACKUP" "export"
 	[[ $ORG_STATE = "running" ]] && [[ "$2" != "child" ]] && logger_xen "Now starting up $1, because ORG_STATE was $ORG_STATE" && xen_xe_func "$1" "start" && logger_xen "Giving $WARM_UP_DELAY seconds so that $1 finishes warming up" && sleep $WARM_UP_DELAY
 	[[ $2 = "child" ]] && logger_xen "This VM \"$VM_NAME_FROM_UUID\" is a CHILD, will not start it until PARENT is done."
-	[[ $EXPORT = "OK" ]] && rm -v "$BACKUP_FILE_AND_LOCAL_LONG.org" -f && logger_xen "Deleted old backup for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" as new one is OK."
+	[[ $EXPORT = "OK" ]] && rm "$BACKUP_FILE_AND_LOCAL_LONG.org" -f && logger_xen "Deleted old backup for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" as new one is OK."
 }
 ##################ENGINE#############################################
 logger_xen "Welcome to the Xen-pocalypse backup script that uses functions."
@@ -240,7 +241,7 @@ Email_func "$Email_VAR" "Started"
 if [[ $DEBUG = "0" ]]; then WARM_UP_DELAY=60; else WARM_UP_DELAY=5 ; fi
 
 #massaging BackupLocation, so that it doesn't have trailing slashes
-BackupLocation=${BackupLocation%/}; [[ $DEBUG != "0" ]] && logger_xen "BackupLocation trailing slash have been removed"
+BackupLocation=${BackupLocation%/}; [[ $DEBUG = "ALL" || $DEBUG =~ .*backuplocation.* ]] && logger_xen "BackupLocation trailing slash have been removed."
 
 
 #VM list arbitrator
@@ -289,6 +290,7 @@ for VM in $VM_LIST_UUID; do
 	if [[ $DEP_STATE = "dep_parent" ]]; then
 		logger_xen "Found that \"$VM_NAME_FROM_UUID\" is a Parent for \"$CHILDREN_LIST\". Will now backup the children."
 		for CHILD in $CHILDREN_LIST_UUID; do
+			logger_xen "" # log formatting
 			logger_xen "Backing up CHILD \"$CHILD\" for PARENT $VM_NAME_FROM_UUID."
 			backup_func "$CHILD" "child"
 			logger_xen "" # log formatting
@@ -302,10 +304,11 @@ for VM in $VM_LIST_UUID; do
 		logger_xen "Done starting all children for \"$VM_NAME_FROM_UUID\" with UUID of: \"$VM\""
 		logger_xen "" # log formatting
 	elif [[ $DEP_STATE = "dep_child" ]]; then
-			logger_xen "Found this VM \"$VM\" to be a CHILD of \"$PARENT\", so skipping it for now."
+			logger_xen "Found this VM \"$VM_NAME_FROM_UUID\" to be a CHILD of \"$PARENT\", so skipping it for now."
 			logger_xen "" # log formatting
 	fi
 	[[ $DEP_STATE = "null" ]] && backup_func "$VM"
+	logger_xen "" # log formatting
 	logger_xen "" # log formatting
 done
  
