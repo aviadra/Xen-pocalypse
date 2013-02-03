@@ -59,7 +59,7 @@ xen_xe_func()
 			fi
 			if [[ $DEBUG = "0" || $DEBUG =~ .*ExportENABLed.* ]]; then
 				$export_cmd > /dev/null
-				if [[ "`echo $?`" -eq 0 ]]; then
+				if [[ "$?" -eq 0 ]]; then
 					EXPORT="OK"
 					logger_xen "Successfully exported \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" :)"
 					[[ $DEBUG = "ALL" || $DEBUG =~ .*Export_func.* ]] && logger_xen "Will now wait for 5s, to let \"$1\" time to cool-down."
@@ -94,20 +94,20 @@ xen_xe_func()
 			[[ "$3" = "child" ]] && VM_TO_START="$( $xencmd vm-list name-label=$1 | grep uuid | awk '{ print $5 }' )"
 			[[ $DEBUG = "ALL" || $DEBUG =~ .*start.* ]] && logger_xen "VM_TO_START was set to: \"$VM_TO_START\". (Its name is: \"$VM_NAME_FROM_UUID\")"
 			$xencmd vm-start uuid="$VM_TO_START"
-			if [[ "`echo $?`" -eq 0 ]] ; then
+			if [[ "$?" -eq 0 ]] ; then
 				logger_xen "Successfully started \"$1\""
 			else
 				logger_xen "FAILED to start \"$1\""
 				logger_xen "Waiting for 10s and retrying to start VM \"$1\""
 				sleep 10
 				$xencmd vm-start uuid="$1"
-				if [[ "`echo $?`" -eq 0 ]] ;then
+				if [[ "$?" -eq 0 ]] ;then
 					logger_xen "Retry to start VM \"$1\" was successful"
 				else
 					logger_xen "FAILED again to start \"$1\". Will sleep for $WARM_UP_DELAY seconds and try a third and final time"
 					sleep $WARM_UP_DELAY
 					$xencmd vm-start uuid="$1"
-					if [[ "`echo $?`" -eq 0 ]] ;then
+					if [[ "$?" -eq 0 ]] ;then
 						logger_xen "Retry to start VM \"$1\" was successful"
 					else
 						logger_xen "FAILED twice to start \"$1\"" "Exception!!" "expose"
@@ -123,7 +123,7 @@ xen_xe_func()
 			if [[ $POWERSTATE != "halted" ]] ; then
 				[[ $DEBUG != "0" ]] && logger_xen "About to: \"$xencmd vm-shutdown uuid=$1\"."
 				$xencmd vm-shutdown uuid="$1"
-				if [[ "`echo $?`" -eq 0 ]] ;then
+				if [[ "$?" -eq 0 ]] ;then
 					logger_xen "Successfully shutdown VM \"$1\"."
 					[[ $DEBUG = "ALL" || $DEBUG =~ .*shutdown.* ]] && logger_xen "Will now wait for 5s, to let \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" time to cool-down"
 					sleep 5
@@ -140,7 +140,7 @@ xen_xe_func()
 			PARENT="null"
 			[[ $DEBUG = "ALL" || $DEBUG =~ .*deps_state_custom.* ]] && logger_xen "The deps_state_custom func has been invoked for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\"."
 			CHILDREN_LIST="$( $xencmd vm-param-get uuid=$VM_UUID param-name=other-config param-key=XenCenter.CustomFields.Children 2> /dev/null )"
-			if [[ "`echo $?`" -eq 0 ]] ; then
+			if [[ "$?" -eq 0 ]] ; then
 				logger_xen "VM has children. They are: $CHILDREN_LIST."
 				for CHILD_NAME in $CHILDREN_LIST; do
 					xen_xe_func "$CHILD_NAME" "name_2_uuid"
@@ -151,7 +151,7 @@ xen_xe_func()
 			else
 				[[ $DEBUG = "ALL" || $DEBUG =~ .*deps_state_custom.* ]] && logger_xen "No Children were found for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\". looking for a PARENT."
 				PARENT="$( $xencmd vm-param-get uuid=$VM_UUID param-name=other-config param-key=XenCenter.CustomFields.Parent 2> /dev/null )"
-				if [[ "`echo $?`" -eq 0 ]] ; then
+				if [[ "$?" -eq 0 ]] ; then
 					[[ $DEBUG = "ALL" || $DEBUG =~ .*deps_state_custom.* ]] && logger_xen "VM has a Parent. It is: \"$PARENT\"."
 					DEP_STATE="dep_child"
 				else
@@ -240,9 +240,30 @@ Email_func "$Email_VAR" "Started"
 
 if [[ $DEBUG = "0" ]]; then WARM_UP_DELAY=60; else WARM_UP_DELAY=5 ; fi
 
+###Target location preflight checks
 #massaging BackupLocation, so that it doesn't have trailing slashes
 BackupLocation=${BackupLocation%/}; [[ $DEBUG = "ALL" || $DEBUG =~ .*backuplocation.* ]] && logger_xen "BackupLocation trailing slash have been removed."
-
+touch $BackupLocation/testfile.blob &> /dev/null
+if [[ "$?" -eq 0 ]] ; then
+	[[ $DEBUG = "ALL" || $DEBUG =~ .*backuplocation.* ]] && logger_xen "Trying to create a simple file was successful."
+	[[ $CHECK_FREE_SPACE = "yes" ]] && [[ $DEBUG = "ALL" || $DEBUG =~ .*backuplocation.* ]] && logger_xen "The CHECK_FREE_SPACE is set to \"$CHECK_FREE_SPACE\", so will try to create a 10G file." 
+	[[ $CHECK_FREE_SPACE = "yes" ]] && dd if=/dev/zero of=$BackupLocation/testfile.blob bs=1 seek=10240000000 count=1 &> /dev/null
+		if [[ "$?" -eq 0 ]] ; then
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*backuplocation.* ]] && logger_xen "Was able to create a 10G file."
+			rm -f $BackupLocation/testfile.blob &> /dev/null
+			if [[ "$?" -eq 0 ]] ; then
+				[[ $DEBUG = "ALL" || $DEBUG =~ .*backuplocation.* ]] && logger_xen "Was able to delete test file."
+			else
+				logger_xen "Was not able to delete test file??" "expose" "Backup location - Abort!"
+			fi
+		else
+				logger_xen "Was not able to create a 10G file, so aborting backup run.\\nNote: This behavior can be changed in the settings file by changing the CHECK_FREE_SPACE parameter to \"no\"." "expose" "Backup location - Abort!"
+			exit 2
+		fi
+else
+	logger_xen "Was unable to create even the simplest form of a file to the backup location \"$BackupLocation\", so backup run has been aborted." "expose" "Backup location - Abort!"
+	exit 2
+fi
 
 #VM list arbitrator
 if [[ $LIST_METHOD = "FILE" ]]; then
@@ -314,4 +335,8 @@ done
  
 #Yey Done
 logger_xen "Backup script has finished its run and will now Email the report."
-Email_func "$Email_VAR" "Report"
+if [[ $LIST_METHOD = "TAGs" ]]; then
+	Email_func "$Email_VAR" "Report for $TAG"
+else
+	Email_func "$Email_VAR" "Report"
+fi
