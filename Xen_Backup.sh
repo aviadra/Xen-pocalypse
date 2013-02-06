@@ -5,9 +5,9 @@ xencmd="/opt/xensource/bin/xe"
 logger_xen()
 {
 if [[ "$2" = "expose" || $DEBUG != "0" && -n $DEBUG ]]; then 
-	logger_cmd="logger -s -p local0.notice -t Xen_funcy_backup_script "
+	logger_cmd="logger -s -p local0.notice -t Xen-pocalypse "
 else
-	logger_cmd="logger -p local0.notice -t Xen_funcy_backup_script "
+	logger_cmd="logger -p local0.notice -t Xen-pocalypse "
 fi
 
 if [[ -n "$1" ]]; then
@@ -210,7 +210,7 @@ backup_func()
 	[[ $EXPORT = "OK" ]] && rm "$BACKUP_FILE_AND_LOCAL_LONG.org" -f && logger_xen "Deleted old backup for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" as new one is OK."
 }
 ##################ENGINE#############################################
-logger_xen "Welcome to the Xen-pocalypse backup script that uses functions."
+logger_xen "Welcome to the Xen-pocalypse backup script."
 logger_xen "" # log formatting
 
 if [[ -z "$@" ]]; then
@@ -220,7 +220,7 @@ fi
 
 SETTINGS_FILE="$1"
 [[ ! -e $SETTINGS_FILE ]] && logger_xen "Settings file, $SETTINGS_FILE not found" && exit 2
-if [[ -n $( head -1 $SETTINGS_FILE | grep "settings file for the funcky" ) ]]; then 
+if [[ -n $( head -1 $SETTINGS_FILE | grep "settings file for the Xen-pocalypse" ) ]]; then 
 	source $SETTINGS_FILE && logger_xen "Settings file header found in \"$SETTINGS_FILE\", so it was sourced."
 	[[ $DEBUG != "0" ]] && logger_xen "The DEBUG paramter is enabled and the following flags are used: \"$DEBUG\""
 else
@@ -277,7 +277,7 @@ if [[ $LIST_METHOD = "FILE" ]]; then
 		logger_xen "Filelist \"$2\" cannot be empty!" "expose"
 		exit 2
 	fi
-	if [[ -n $( head -1 $FILELIST | grep "settings file for the funcky" ) ]]; then
+	if [[ -n $( head -1 $FILELIST | grep "settings file for the Xen-pocalypse" ) ]]; then
 		logger_xen "You are trying to use the settings file as the Filelist. Stop it...\n First argument is the settings file, second is the file list." "expose"
 		exit 2
 	fi
