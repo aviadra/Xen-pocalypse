@@ -1,5 +1,4 @@
 #!/bin/bash
-#logging to syslog
 xencmd="/opt/xensource/bin/xe"
 
 logger_xen()
