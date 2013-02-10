@@ -90,6 +90,7 @@ xen_xe_func()
 			fi
 			;;
 		start)
+			[[ $DEBUG = "ALL" || $DEBUG =~ .*start.* ]] && logger_xen "StartVM func invoked."
 			VM_TO_START="$1"
 			[[ "$3" = "child" ]] && VM_TO_START="$( $xencmd vm-list name-label=$1 | grep uuid | awk '{ print $5 }' )"
 			[[ $DEBUG = "ALL" || $DEBUG =~ .*start.* ]] && logger_xen "VM_TO_START was set to: \"$VM_TO_START\". (Its name is: \"$VM_NAME_FROM_UUID\")"
@@ -205,9 +206,14 @@ backup_func()
 	[[ $POWERSTATE = "running" ]] && xen_xe_func "$1" "shutdown"
 	logger_xen "Now exporting \"$VM_TO_BACKUP\"."
 	xen_xe_func "$VM_TO_BACKUP" "export"
-	[[ $ORG_STATE = "running" ]] && [[ "$2" != "child" ]] && logger_xen "Now starting up $1, because ORG_STATE was $ORG_STATE" && xen_xe_func "$1" "start" && logger_xen "Giving $WARM_UP_DELAY seconds so that $1 finishes warming up" && sleep $WARM_UP_DELAY
+	if [[ $ORG_STATE = "running" && "$2" != "child" ]];then 
+		logger_xen "Now starting up $1, because ORG_STATE was $ORG_STATE"
+		xen_xe_func "$1" "start"
+		logger_xen "Giving $WARM_UP_DELAY seconds so that $1 finishes warming up"
+		sleep $WARM_UP_DELAY
+	fi
 	[[ $2 = "child" ]] && logger_xen "This VM \"$VM_NAME_FROM_UUID\" is a CHILD, will not start it until PARENT is done."
-	[[ $EXPORT = "OK" ]] && rm "$BACKUP_FILE_AND_LOCAL_LONG.org" -f && logger_xen "Deleted old backup for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" as new one is OK."
+	[[ $EXPORT = "OK" && -e $BACKUP_FILE_AND_LOCAL_LONG.org ]] && rm "$BACKUP_FILE_AND_LOCAL_LONG.org" -f && logger_xen "Deleted old backup for \"$VM_NAME_FROM_UUID\" with UUID of: \"$1\" as new one is OK."
 }
 ##################ENGINE#############################################
 logger_xen "Welcome to the Xen-pocalypse backup script."
