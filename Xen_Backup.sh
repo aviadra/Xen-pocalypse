@@ -25,7 +25,7 @@ Email_func()
 	MSG="$1"
 	[[ ! -x $SendEmail_location ]] && logger_xen "The SendEmail_location \"$SendEmail_location\", does NOT point to a perl executable." && continue
 	[[ -z "$2" ]] && EMAIL_SUB="Exception" || EMAIL_SUB="$2"
-	[[ "$2" = "Started" ]] && MSG="$MSG \\nThe VM list is set to be obtained using \"$LIST_METHOD\".\\nThe parameter that will be used is: \"$SECOND_PARAM\"."
+	[[ "$2" = "Started" ]] && MSG="$MSG \\nThe VM list is set to be obtained using \"$LIST_METHOD\".\\nThe parameter that will be used is: \"$SECOND_PARAM\"." && [[ $LIST_METHOD = "TAGs" ]] && EMAIL_SUB="$EMAIL_SUB for $SECOND_PARAM"
 	[[ "$2" =~ .*Exception.* ]] && MSG="$MSG \\nThe VM list was obtained using \"$LIST_METHOD\".\\n" && if [[ $LIST_METHOD = "FILE" ]]; then MSG="$MSG \n\n The list was $FILELIST"; else MSG="$MSG \n\n The TAG was $TAG" ;fi
 	[[ $DEBUG = "0" || $DEBUG =~ .*EmailENABLed.* ]] && [[ -e $SendEmail_location ]] && $SendEmail_location -f "$EMAIL_FROM" -t "$EMAIL_TO" -u "Xen_backup - $EMAIL_SUB" -s "$EMAIL_SMART_HOST" -q -m "$MSG"
 } 
