@@ -248,6 +248,11 @@ if [[ $DEBUG = "0" ]]; then WARM_UP_DELAY=60; else WARM_UP_DELAY=5 ; fi
 ###Target location preflight checks
 #massaging BackupLocation, so that it doesn't have trailing slashes
 BackupLocation=${BackupLocation%/}; [[ $DEBUG = "ALL" || $DEBUG =~ .*backuplocation.* ]] && logger_xen "BackupLocation trailing slash have been removed."
+#warmup backup location
+dd if=/dev/zero of=$BackupLocation/testfile.blob bs=1M count=1 &> /dev/null
+touch $BackupLocation/testfile.blob &> /dev/null
+rm -f $BackupLocation/testfile.blob &> /dev/null
+#end of warmup
 touch $BackupLocation/testfile.blob &> /dev/null
 if [[ "$?" -eq 0 ]] ; then
 	[[ $DEBUG = "ALL" || $DEBUG =~ .*backuplocation.* ]] && logger_xen "Trying to create a simple file was successful."
