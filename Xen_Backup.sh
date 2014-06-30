@@ -52,7 +52,7 @@ xen_xe_func()
 		export)	
 			xen_xe_func "$1" "uuid_2_name"
 			if [[ $ENABLE_COMPRESSION = "yes" ]]; then
-					export_cmd="$xencmd vm-export compress=true uuid=$1 filename=\"${BackupLocation}/${VM_NAME_FROM_UUID}-${1}.xva\""
+					export_cmd="$xencmd vm-export compress=true uuid=$1 filename=$BACKUP_FILE_AND_LOCAL_LONG"
 				else
 					export_cmd="$xencmd vm-export uuid=$1 filename=$BACKUP_FILE_AND_LOCAL_LONG"
 			fi
