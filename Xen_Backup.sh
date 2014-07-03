@@ -4,9 +4,9 @@ xencmd="/opt/xensource/bin/xe"
 logger_xen()
 {
 if [[ "$2" = "expose" || $DEBUG != "0" && -n $DEBUG ]]; then 
-	logger_cmd="logger -s -p local0.notice -t Xen-pocalypse "
+	logger_cmd="logger -s -t Xen-pocalypse "
 else
-	logger_cmd="logger -p local0.notice -t Xen-pocalypse "
+	logger_cmd="logger -t Xen-pocalypse "
 fi
 
 if [[ -n "$1" ]]; then
